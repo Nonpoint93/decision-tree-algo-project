@@ -2,104 +2,145 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from joblib import dump
+from sklearn import tree
+from sklearn.feature_selection import SelectKBest
 
 TARGET = "https://raw.githubusercontent.com/4GeeksAcademy/decision-tree-project-tutorial/main/diabetes.csv"
 
+param_grid = {
+    "max_depth": [3, 5, 10, 15, None],
+    "min_samples_split": [2, 5, 10, 15],
+    "min_samples_leaf": [1, 2, 4, 8],
+    "criterion": ["gini", "entropy"]
+}
+
 def read_data() -> pd.DataFrame:
+    """Load dataset from URL"""
     try:
-        return pd.read_csv(TARGET, delimiter=',')
+        return pd.read_csv(TARGET)
     except Exception as e:
-        print("Error reading the file")
-        print(e)
+        print("Error reading the file:", e)
         return None
 
 def save_data(df: pd.DataFrame, path: str) -> None:
+    """Save DataFrame to CSV"""
     try:
         df.to_csv(path, index=False)
     except Exception as e:
-        print("Error writing the file")
-        print(e)
+        print("Error writing the file:", e)
 
+
+def display_summary(y_test, y_pred):
+    print("\nModel Accuracy:", accuracy_score(y_test, y_pred))
+    print("\nClassification Report:\n", classification_report(y_test, y_pred))
+    print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred))
 
 def main():
-
-    # Read the data from dataset to dataframe
+    # Load dataset
     df = read_data()
-    if df is not None:
-        print(df.head())
-        print(df.tail())
-        print(df.info())
-        print(df.describe())
+    if df is None:
+        return
+    
+    df.head()
+    df.tail()
+    df.info()
+    df.describe()
 
+    # Remove duplicates
     if df.duplicated().sum() > 0:
         print("There are duplicated rows\n")
-        df = df.drop_duplicates()
+        df.drop_duplicates(inplace=True)
     else:
-        print("There are no duplicated rows\n")
+        print("There are no duplicated rows\n") 
 
+    # Check and handle missing values
     if df.isnull().sum().sum() > 0:
         print("There are missing values\n")
-        df = df.dropna(axis=1)
+        df.dropna(inplace=True)
     else:
         print("There are no missing values\n")
-
-    outliers = []
-    for column in df.select_dtypes(include=['number']).columns:
-        Q1 = df[column].quantile(0.25)
-        Q3 = df[column].quantile(0.75)
-        IQR = Q3 - Q1
-        num_outliers = ((df[column] < (Q1 - 1.5 * IQR)) | (df[column] > (Q3 + 1.5 * IQR))).sum()
-        if num_outliers > 0:
-            outliers.append(column)
-            print(f"Column {column} has {num_outliers} outliers")
-
-    if len(outliers) != 0:
-        _, axi = plt.subplots(len(outliers), 1, figsize=(10, 10))
-        for i, column in enumerate(outliers):
-            sns.boxplot(df[column], ax=axi[i])
-            plt.title(f"Boxplot de {column}")
-        plt.show()
-    else:    
-        print("There are no outliers\n")
     
-    conditions = [
-        (df["Glucose"] >= 40) & (df["Glucose"] <= 300),
-        (df["BloodPressure"] >= 50) & (df["BloodPressure"] <= 180),
-        (df["Insulin"] <= 300),
-        (df["BMI"] <= 60),
-        (df["Age"] <= 100)
-    ]
-
-    df = df[np.logical_and.reduce(conditions)]
+    # Feature transformations
     df["DiabetesPedigreeFunction"] = np.log1p(df["DiabetesPedigreeFunction"])
-    
-    print("After cleaning the data\n")
-    print(df.describe())
 
-    save_data(df=df, path="./data/interim/clean_diabetes_data.csv")
+    print("After cleaning the data\n", df.describe())
 
-    sns.heatmap(df.corr(), annot=True, cmap='coolwarm', fmt=".2f")
+    # Save cleaned data
+    save_data(df, "./data/interim/clean_diabetes_data.csv")
+
+    # Correlation heatmap
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(df.corr(), annot=True, cmap="coolwarm", fmt=".2f")
     plt.title("Correlation Matrix")
     plt.show()
 
+    # Split dataset
     X = df.drop(columns="Outcome")
     y = df["Outcome"]
 
-    total_data = X
-    total_data["Outcome"] = y
-    pd.plotting.parallel_coordinates(total_data, "Outcome", color=('#556270', '#4ECDC4'))
+    # Parallel coordinates plot
+    total_data = df.copy()
+    pd.plotting.parallel_coordinates(total_data, "Outcome", color=("#E58139", "#39E581", "#8139E5"))
     plt.title("Parallel Coordinates Plot")
     plt.show()
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    print(X_train.head())
+    select_k_best = SelectKBest(k=8)
+    select_k_best.fit_transform(X_train, y_train)
 
-    save_data(df=X_train, path="./data/processed/X_train.csv")
-    save_data(df=X_test, path="./data/processed/X_test.csv")
-    save_data(df=y_train, path="./data/processed/y_train.csv")
-    save_data(df=y_test, path="./data/processed/y_test.csv")
+    selected_columns = X.columns[select_k_best.get_support()]
+    X_train_selected = pd.DataFrame(select_k_best.transform(X_train), columns=selected_columns)
+    X_test_selected = pd.DataFrame(select_k_best.transform(X_test), columns=selected_columns)
+
+    save_data(X_train_selected, "./data/processed/X_train_selected.csv")
+    save_data(X_test_selected, "./data/processed/X_test_selected.csv")
+    save_data(y_train, "./data/processed/y_train.csv")
+    save_data(y_test, "./data/processed/y_test.csv")
+
+    print("X_train_selected:\n", X_train_selected.head())
+
+    # Train Decision Tree Model
+    model = DecisionTreeClassifier(random_state=42)
+    model.fit(X_train_selected, y_train)
+
+    # Plot decision tree
+    plt.figure(figsize=(15, 10))
+    tree.plot_tree(model, feature_names=X_train_selected.columns, filled=True)
+    plt.title("Decision Tree Structure")
+    plt.show()
+
+    # Evaluate model
+    y_pred = model.predict(X_test)
+    display_summary(y_test, y_pred)
+
+    # Hyperparameter tuning with GridSearchCV
+    grid_search = GridSearchCV(DecisionTreeClassifier(random_state=42), param_grid, cv=10, scoring="accuracy")
+    grid_search.fit(X_train_selected, y_train)
+
+    print("\nBest Parameters:", grid_search.best_params_)
+
+    best_model = DecisionTreeClassifier(random_state=42, **grid_search.best_params_)
+    best_model.fit(X_train_selected, y_train)
+
+    # Plot optimized decision tree
+    plt.figure(figsize=(15, 10))
+    tree.plot_tree(best_model, feature_names=X_train_selected.columns, filled=True)
+    plt.title("Optimized Decision Tree Structure")
+    plt.show()
+
+    # Evaluate optimized model
+    y_pred = best_model.predict(X_test)
+
+    print("\nOptimized Model")
+    display_summary(y_test, y_pred)
+
+    # Save optimized model
+    dump(best_model, "./data/processed/model_dt_entropy_d5_l8_s2.sav")
 
 if __name__ == '__main__':
     main()
